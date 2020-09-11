@@ -9,5 +9,3 @@ CS330 Operation System
 - 이전의 완성된 버전들은 'release/버전명'에 남겨둔다. 언제나 실행 가능해야 한다. 
 - 긴급 수정사항은 'hotfixes/차기버전명'을 이용한다.
 
-
-test
