@@ -90,10 +90,11 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  /* Instead of busy waiting, we use timer interrupt. this
+     function make thread deep sleep. */
+  thread_sleep(start + ticks);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +173,9 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  /* Check threads which has to wake up in S.L. */
+  if (get_ticks_to_wake() <= ticks) {thread_awake(ticks);  /*Awake threads. */}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

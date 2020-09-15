@@ -88,6 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int64_t wake_ticks;                 /* Time to wake up. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -107,6 +108,9 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+void update_ticks_to_wake(int64_t ticks);
+int64_t get_ticks_to_wake(void);
+
 void thread_init (void);
 void thread_start (void);
 
@@ -115,6 +119,9 @@ void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
+
+void thread_sleep(int64_t ticks);
+void thread_awake(int64_t ticks);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
