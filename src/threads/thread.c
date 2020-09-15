@@ -58,7 +58,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 
-int64_t ticks_to_wake = INT64_MAX;          /* # of timer ticks which represents the fastest time to awake thread. */
+int64_t ticks_to_wake;          /* # of timer ticks which represents the fastest time to awake thread. */
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -85,7 +85,7 @@ void
 update_ticks_to_wake(int64_t ticks)
 {if (ticks_to_wake > ticks){ticks_to_wake = ticks;}}
 
-/* Get ticks_to_wake to use this at other pages. */
+/* Get ticks_to_wake to use this in other pages. */
 int64_t
 get_ticks_to_wake(void) {return ticks_to_wake;}
 
@@ -93,8 +93,6 @@ get_ticks_to_wake(void) {return ticks_to_wake;}
 bool
 less_priority(struct list_elem *higher, struct list_elem *lower, void *aux UNUSED)
 {
-  ASSERT (higher != NULL);
-  ASSERT (lower != NULL);
 
   struct thread *higher_thread = list_entry(higher, struct thread, elem);
   struct thread *lower_thread = list_entry(lower, struct thread, elem);
@@ -230,9 +228,26 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  //printf("Initiation sucess.\n");
+
   /* Add to run queue. */
   thread_unblock (t);
 
+  //printf("Unblock sucess.\n");
+
+  /* Compare the priority of created thread and current thread.
+     If priority of created thread is higher, then we exchange
+     two threads. */
+  if (t->priority > thread_current()->priority) {
+    thread_yield();
+    //printf("Yield sucess.\n");
+    //schedule();
+  }
+  //struct list_elem *e;
+  //for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+  //{
+  //  printf("thread arrange %d\n", list_entry(e, struct thread, elem)->tid);
+  //}
   return tid;
 }
 
@@ -318,8 +333,7 @@ thread_unblock (struct thread *t)
   //list_push_back (&ready_list, &t->elem);
   
   /* Put thread t in decreasing order. */
-  void* aux;
-  list_insert_ordered(&ready_list, &t->elem, less_priority, aux);
+  list_insert_ordered(&ready_list, &t->elem, less_priority, NULL);
 
   t->status = THREAD_READY;
   intr_set_level (old_level);
@@ -384,21 +398,29 @@ thread_exit (void)
 void
 thread_yield (void) 
 {
+  struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+
   struct thread *cur = thread_current ();
   enum intr_level old_level;
-  
+
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
+
+  //printf("A :cur tid %d, priority %d\n", cur->tid, cur->priority);
+  //printf("A :t tid %d, priority %d\n", t->tid, t->priority);
   if (cur != idle_thread) 
     //list_push_back (&ready_list, &cur->elem);
-  {
+  
     /* Put thread t in decreasing order. */
-    void *aux;
-    list_insert_ordered(&ready_list, &cur->elem, less_priority, aux);
-  }
+    list_insert_ordered(&ready_list, &cur->elem, less_priority, NULL);
+    //cur->status = THREAD_READY;
+    //schedule ();
+  
   cur->status = THREAD_READY;
   schedule ();
+  //printf("A : cur tid %d, priority %d\n", cur->tid, cur->priority);
+  //printf("A : t tid %d, priority %d\n", t->tid, t->priority);
   intr_set_level (old_level);
 }
 
@@ -424,6 +446,13 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+
+  /* Re-check the priority and exchange threads. */
+  struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+
+  if (t->priority > thread_current()->priority) {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
