@@ -125,13 +125,13 @@ sema_up (struct semaphore *sema)
   }
   sema->value++;
 
-  // if (!list_empty (get_ready_list()))
-  // {
-  //   if (less_priority(list_begin(get_ready_list()),&thread_current()->elem, NULL))
-  //   {
-  //       thread_yield();
-  //   }
-  // }
+  if (!list_empty (get_ready_list()))
+  {
+    if (less_priority(list_begin(get_ready_list()),&thread_current()->elem, NULL))
+    {
+        thread_yield();
+    }
+  }
 
   intr_set_level (old_level);
 }
@@ -223,8 +223,8 @@ lock_acquire (struct lock *lock)
   //printf("tid has lock is %d\n", lock->holder->tid);
   if (lock->holder != NULL && cur_priority > lock->holder->priority)
   {
-    // printf("if1 in \n");
-    if (list_empty(&lock->holder->donated)) 
+    //printf("if1 in \n");
+    if (list_empty(&lock->holder->donated))
     {
       // printf("if2 in \n");
       lock->holder->origin_priority = lock->holder->priority;    /* Save original priority. */
@@ -233,8 +233,8 @@ lock_acquire (struct lock *lock)
 
     thread_current()->lock_wait_for = lock;
     list_insert_ordered(&lock->holder->donated, &thread_current()->donate_elem, less_priority, NULL);
-    //list_push_back(&lock->holder->donated, &thread_current()->donate_elem);
-    //printf("list num = %d\n", list_size(&lock->holder->donated));
+    // list_push_back(&lock->holder->donated, &thread_current()->donate_elem);
+    // printf("list num = %d\n", list_size(&lock->holder->donated));
     // printf("init_tid %d\n", lock->holder->tid);
     // printf("init_pri %d\n", lock->holder->priority);
     // printf("origin_pri %d\n", lock->holder->origin_priority);
@@ -279,8 +279,7 @@ lock_release (struct lock *lock)
   enum intr_level old_level;
   old_level = intr_disable ();
   // if ((&lock->name == 1)||(&lock->name == 2)) {printf("a b release\n");}
-  struct thread* cur = lock->holder;
-  struct list* donate_list = &cur->donated;
+  struct list* donate_list = &lock->holder->donated;
 
   /* Remove all threads who has same lock released. */
   struct list_elem* base = list_begin(donate_list);
@@ -290,6 +289,7 @@ lock_release (struct lock *lock)
     {
       list_entry(base, struct thread, elem)->lock_wait_for = NULL;
       base = list_remove(base);
+      printf("eliminate success.\n");
     }
     else {base = base->next;}
   }
@@ -297,20 +297,45 @@ lock_release (struct lock *lock)
   /* Re-modulate priority. */
   if (!list_empty(donate_list))
   {
-    if (list_size(donate_list) == 1)
+    int xxx =list_entry(list_begin(donate_list), struct thread, elem)->priority;
+    if (xxx > lock->holder->origin_priority && xxx < lock->holder->priority)
     {
-      cur->priority = cur->origin_priority;
-      cur->origin_priority = 0;
+      lock->holder->priority = xxx;
     }
-    else
+  }
+  else
+  {
+    if (lock->holder->origin_priority != 0)
     {
-      list_sort (donate_list, less_priority, NULL);
-      cur->priority = list_entry(list_begin(donate_list), struct thread, elem)->priority;
+      lock->holder->priority = lock->holder->origin_priority;
+      lock->holder->origin_priority = 0;
     }
-  } 
+  }
+  //   if () lock->holder->priority >= list_entry(list_begin(donate_list), struct thread, elem)->priority
+  //   {
+  //     lock->holder->priority = lock->holder->origin_priority;
+  //     lock->holder->origin_priority = 0;
+  //   }
+  //   else {lock->holder->priority = list_entry(list_begin(donate_list), struct thread, elem)->priority;}
+  // }
+
+    // printf("\ncase1 in\n");
+    // if (list_size(donate_list) == 0)
+    // {
+    //   // printf("\ncase2 in\n");
+    //   //cur->priority = cur->origin_priority;
+    //   //cur->origin_priority = 0;
+    // }
+    // else
+    // {
+    //   // printf("\ncase3 in\n");
+    //   //list_sort (donate_list, less_priority, NULL);
+    //   //cur->priority = list_entry(list_begin(donate_list), struct thread, elem)->priority;
+    // }
 
   /* Reset holder. */
-  cur->num_lock -=1;
+
+  lock->holder->num_lock -=1;
   lock->holder = NULL;
   sema_up (&lock->semaphore);
   intr_set_level (old_level);

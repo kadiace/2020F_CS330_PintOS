@@ -34,24 +34,56 @@ test_priority_donate_multiple2 (void)
 
   /* Make sure our priority is the default. */
   ASSERT (thread_get_priority () == PRI_DEFAULT);
-
   lock_init (&a);
   lock_init (&b);
-
+  a.name = 1;
+  b.name = 2;
   lock_acquire (&a);
   lock_acquire (&b);
+
+  // msg("holder tid is %d", a.holder->tid);
+  // msg("holder tid is %d", b.holder->tid);
+  // msg ("a holder priority is %d", a.holder->priority);
+  // msg ("b holder priority is %d", b.holder->priority);
+  // msg ("a origin priority is %d", a.holder->origin_priority);
+  // msg ("b origin priority is %d", b.holder->origin_priority);
+  // msg ("a donate list size is %d", list_size(&a.holder->donated));
+  // msg ("b donate list size is %d", list_size(&b.holder->donated));
+  // msg ("a numlock is %d", a.holder->num_lock);
+  // msg ("b numlock is %d", b.holder->num_lock);
 
   thread_create ("a", PRI_DEFAULT + 3, a_thread_func, &a);
   msg ("Main thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 3, thread_get_priority ());
+  // msg("holder tid is %d", a.holder->tid);
+  // msg("holder tid is %d", b.holder->tid);
+  // msg ("a holder priority is %d", a.holder->priority);
+  // msg ("b holder priority is %d", b.holder->priority);
+  // msg ("a origin priority is %d", a.holder->origin_priority);
+  // msg ("b origin priority is %d", b.holder->origin_priority);
+  // msg ("a donate list size is %d", list_size(&a.holder->donated));
+  // msg ("b donate list size is %d", list_size(&b.holder->donated));
+  // msg ("a numlock is %d", a.holder->num_lock);
+  // msg ("b numlock is %d", b.holder->num_lock);
 
   thread_create ("c", PRI_DEFAULT + 1, c_thread_func, NULL);
 
   thread_create ("b", PRI_DEFAULT + 5, b_thread_func, &b);
   msg ("Main thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 5, thread_get_priority ());
+  // msg("holder tid is %d", a.holder->tid);
+  // msg("holder tid is %d", b.holder->tid);
+  // msg ("a holder priority is %d", a.holder->priority);
+  // msg ("b holder priority is %d", b.holder->priority);
+  // msg ("a origin priority is %d", a.holder->origin_priority);
+  // msg ("b origin priority is %d", b.holder->origin_priority);
+  // msg ("a donate list size is %d", list_size(&a.holder->donated));
+  // msg ("b donate list size is %d", list_size(&b.holder->donated));
+  // msg ("a numlock is %d", a.holder->num_lock);
+  // msg ("b numlock is %d", b.holder->num_lock);
 
   lock_release (&a);
+  msg ("a numlock is %d", b.holder->num_lock);
   msg ("Main thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 5, thread_get_priority ());
 
@@ -65,7 +97,7 @@ static void
 a_thread_func (void *lock_) 
 {
   struct lock *lock = lock_;
-
+  msg ("a start");
   lock_acquire (lock);
   msg ("Thread a acquired lock a.");
   lock_release (lock);
@@ -76,7 +108,7 @@ static void
 b_thread_func (void *lock_) 
 {
   struct lock *lock = lock_;
-
+  msg ("b start");
   lock_acquire (lock);
   msg ("Thread b acquired lock b.");
   lock_release (lock);

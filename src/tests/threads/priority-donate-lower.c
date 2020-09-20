@@ -25,6 +25,7 @@ test_priority_donate_lower (void)
 
   lock_init (&lock);
   lock_acquire (&lock);
+  //msg("%d is holder, priority is %d", lock.holder->tid, lock.holder->priority);
   thread_create ("acquire", PRI_DEFAULT + 10, acquire_thread_func, &lock);
   msg ("Main thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 10, thread_get_priority ());
