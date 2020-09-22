@@ -92,9 +92,9 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* These variables are made for priority donation method. */
-    int num_lock;                       /* Number of lock */
+    bool orizin;                        /* If origin priority == 0, true. */
     int origin_priority;                /* Save original priority of current thread to get donated priority.
-    //                                     0 means current thread doesn't get donated priority yet. */
+                                           0 means current thread doesn't get donated priority yet. */
     struct list donated;                /* Save all threads who donate his own priority to this thread. */
     struct list_elem donate_elem;       /* Put this in donated list. */
     struct lock* lock_wait_for;         /* Show which lock this thread wait for. */

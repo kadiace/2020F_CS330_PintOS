@@ -271,7 +271,7 @@ thread_awake(int64_t ticks)
 {
   ticks_to_wake = INT64_MAX;            /* Reset ticks_to_wake */
 
-  /* List element to take threads in S.L. */
+  /* List element to take threads in sleep list. */
   struct list_elem *base = list_begin(&sleep_list);
 
   while (base != &sleep_list.tail)
@@ -401,10 +401,10 @@ thread_yield (void)
   old_level = intr_disable ();
 
   if (cur != idle_thread) 
-  
+  {
     /* Put thread t in decreasing order. */
     list_insert_ordered(&ready_list, &cur->elem, less_priority, NULL);
-  
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -431,13 +431,21 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  /* Check current thread is donated. */
+  if (!list_empty(&thread_current()->donated))
+  {
+    thread_current()->origin_priority = new_priority;
+  }
+  else
+  {
+    thread_current ()->priority = new_priority;
 
-  /* Re-check the priority and exchange threads. */
-  struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+    /* Re-check the priority and exchange threads. */
+    struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
 
-  if (t->priority > thread_current()->priority) {
-    thread_yield();
+    if (t->priority > thread_current()->priority) {
+      thread_yield();
+    }
   }
 }
 
@@ -567,7 +575,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  t->num_lock = 0;
+  t->orizin = false;
   t->origin_priority = 0;  /* 0 means this thread isn't donated yet. */
   list_init (&t->donated);
 
