@@ -3,6 +3,7 @@
 
 #include <list.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /* A counting semaphore. */
 struct semaphore 

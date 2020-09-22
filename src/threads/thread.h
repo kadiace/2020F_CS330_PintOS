@@ -91,6 +91,14 @@ struct thread
     int64_t wake_ticks;                 /* Time to wake up. */
     struct list_elem allelem;           /* List element for all threads list. */
 
+    /* These variables are made for priority donation method. */
+    bool orizin;                        /* If origin priority == 0, true. */
+    int origin_priority;                /* Save original priority of current thread to get donated priority.
+                                           0 means current thread doesn't get donated priority yet. */
+    struct list donated;                /* Save all threads who donate his own priority to this thread. */
+    struct list_elem donate_elem;       /* Put this in donated list. */
+    struct lock* lock_wait_for;         /* Show which lock this thread wait for. */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -110,6 +118,8 @@ extern bool thread_mlfqs;
 
 void update_ticks_to_wake(int64_t ticks);
 int64_t get_ticks_to_wake(void);
+bool less_priority(struct list_elem *higher, struct list_elem *lower, void *aux UNUSED);
+struct list* get_ready_list(void);
 
 void thread_init (void);
 void thread_start (void);
