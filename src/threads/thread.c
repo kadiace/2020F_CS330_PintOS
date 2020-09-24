@@ -431,10 +431,18 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   /* Check current thread is donated. */
   if (!list_empty(&thread_current()->donated))
   {
     thread_current()->origin_priority = new_priority;
+    thread_current()->orizin = false;
+    if (!new_priority)
+    {
+      thread_current()->orizin = true;
+    }
   }
   else
   {
@@ -447,6 +455,8 @@ thread_set_priority (int new_priority)
       thread_yield();
     }
   }
+
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
