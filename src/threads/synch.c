@@ -32,6 +32,19 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+void
+yield_by_pri(void)
+{
+  if (list_empty (get_ready_list()))
+  {
+    return;
+  }
+  if (less_priority(list_begin(get_ready_list()),&thread_current()->elem, NULL))
+  {
+      thread_yield();
+  }
+}
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -125,14 +138,9 @@ sema_up (struct semaphore *sema)
   sema->value++;
 
   /* Yield. */
-  if (!list_empty (get_ready_list()))
-  {
-    if (less_priority(list_begin(get_ready_list()),&thread_current()->elem, NULL))
-    {
-        thread_yield();
-    }
+  if (!intr_context()){
+    yield_by_pri();
   }
-
   intr_set_level (old_level);
 }
 
