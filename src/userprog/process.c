@@ -24,15 +24,13 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 void
 push_args_to_stack (char** argv, int argc, void **esp)
 {
-  // char * arg;
   int total_len = 0;
   int len;
-  // printf("address of esp is %d\n", *esp);
+
   /* Push argv[argc-1] ~ argv[0]. */
   for (int i = argc-1;i >= 0;i--)
   {
     /* Save arg[n-1]. */
-    // printf("arg: %s\n", argv[i]);
     len = strlen(argv[i]);
     *esp -=len + 1;
     total_len += len + 1;
@@ -42,9 +40,7 @@ push_args_to_stack (char** argv, int argc, void **esp)
 
   /* Push word align. */
   if (total_len % 4 != 0)
-  {
     *esp -= 4 - (total_len % 4);
-  }
 
   /* push NULL. */
   *esp -= 4;
@@ -70,11 +66,10 @@ push_args_to_stack (char** argv, int argc, void **esp)
   **(uint32_t **)esp = 0;
 
   /* Check stack by hex_dump(). */
-  // printf("hexdump!-push arg\n");
+  // printf("hexdump!\n");
   // uintptr_t ofs = (uintptr_t)*esp;
   // uintptr_t byte_size = 0xc0000000-ofs;
   // hex_dump(ofs, *esp, byte_size, true);
-
 }
 
 int
@@ -83,25 +78,33 @@ seperate_fn (char* fn_copy, char** fn_token)
   int i = 0;
   char* ptr;
   char* next_ptr;
+
+  /* Get full command by split fn_copy by '\n'  */
   ptr = strtok_r(fn_copy, "\n", &next_ptr);
   while (ptr != NULL)
   {
+    /* Split whole sentence by ' '. */
     ptr = strtok_r(ptr, " ", &next_ptr);
     if (ptr == NULL)
       break;
+
     /* Put argument in stack. */
     *(fn_token+i) = ptr;
     ptr = next_ptr;
     i++;
   }
 
+  /* Return argc. */
   return i;
 }
 
 void
 get_command (char *command, char *file_name)
 {
+  /* Allocate and copy. */
   strlcpy(command, file_name, strlen(file_name) + 1);
+
+  /* Put NULL at last address. */
   int i;
   for (i = 0; command[i] != NULL && command[i] != ' ';i++);
   command[i] = NULL;
@@ -110,6 +113,7 @@ get_command (char *command, char *file_name)
 struct thread *
 find_child(struct thread *parent, tid_t tid)
 {
+  /* Check whole child list of parent. */
   struct list_elem *base = list_begin(&thread_current()->child_list);
   while (base != list_tail(&parent->child_list))
   {
@@ -142,7 +146,7 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Get command from fn_copy. */
+  /* Get command from file_name. */
   get_command(command, file_name);
 
   if (filesys_open(command) == NULL)
@@ -150,25 +154,29 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
+
+  /* If child has problem, return -1. */
   if (tid == TID_ERROR)
   {
     palloc_free_page (fn_copy);
     return TID_ERROR;
   }  
-  /* Load_sema up. */
+  /* Get child process, and check child has problem. */
   struct thread *child = find_child(thread_current(), tid);
   if (child == NULL) {
     palloc_free_page (fn_copy);
     return -1;
   }
+
+  /* Load sema down. */
   sema_down(&child->load_sema);
 
+  /* If child fail to load memory, exit. */
   if (!child->load_success)
     return -1;
-
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
   
+  /* Free fn_copy and return child's tid to wait for him. */
+  palloc_free_page (fn_copy);
   return tid;
 }
 
@@ -194,6 +202,7 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (command, &if_.eip, &if_.esp);
 
+  /* Update T/F : child is success to load. */
   thread_current()->load_success = success;
 
   /* Update arguments in stack. */
@@ -202,7 +211,6 @@ start_process (void *file_name_)
   /* Load_sema up. */
   sema_up(&thread_current()->load_sema);
 
-  palloc_free_page(file_name_);
   /* If load failed, quit. */
   if (!success) {
     exit(-1);
@@ -237,13 +245,13 @@ process_wait (tid_t child_tid UNUSED)
   {
     return -1;
   }
-  /* Save status and change sema before remove child. */
+  /* Change sema before remove child, and return child's exit status. */
   sema_down(&child->wait_sema);
   int status = child->exit_status;
   list_remove(&child->child_elem);
   sema_up(&child->exit_sema);
 
-  /* exit in */
+  /* Exit in. */
   return status;
 }
 
@@ -254,7 +262,7 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  /* remove files which is used by this process */
+  /* remove files which is used by current process */
   struct file **table = cur->fd_table;
   for (int i = 2; i < 128; i++)
   {
@@ -263,7 +271,7 @@ process_exit (void)
   }
   free(cur->fd_table);
 
-  /* if process killed due to an exception, clean up the parent-child relationship. */
+  /* If child process killed due to an exception, clean up the parent-child relationship. */
   struct thread* child;
   struct list_elem *base = list_begin(&cur->child_list);
   while (base != list_tail(&cur->child_list))

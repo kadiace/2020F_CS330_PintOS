@@ -14,6 +14,7 @@ struct file
   bool deny_write;            /* Has file_deny_write() been called? */
 };
 
+/* validate esp address is available to the user */
 void check_esp (void *esp_value)
 {
   if (!is_user_vaddr(esp_value) || esp_value == NULL)
@@ -128,7 +129,7 @@ exit (int status)
   /* Print exit message. */
   printf("%s: exit(%d)\n", cur->name, status);
 
-  /* exit. */
+  /* Exit. */
   thread_exit();
 }
 
@@ -166,7 +167,7 @@ open (const char *file)
     return -1;
 
   lock_acquire(&file_lock);
-  /* Change file type to struct file *.*/
+  /* Change file type to struct file *. */
   struct file *result = filesys_open(file);
   if (result == NULL)
   {
@@ -175,11 +176,12 @@ open (const char *file)
   }
   struct file **table = thread_current()->fd_table;
 
-  /* for loop. */
+  /* Check user's empty file descriptor. */
   for (int i = 2;i < 128; i++)
   {
     if (table[i] == NULL)
     {
+      /* if current thread uses some files, then other can't access these files. */
       if (strcmp(thread_current()->name, file) == 0)
       {
         file_deny_write(result);
@@ -209,11 +211,13 @@ read (int fd, void *buffer, unsigned size)
   }
   lock_acquire(&file_lock);
   struct file *file = thread_current()->fd_table[fd];
+  /* If file descriptor is stdout or NULL, return -1. */
   if (fd == 1 || file == NULL)
   {
     lock_release(&file_lock);
     return -1;
   }
+  /* If file descriptor is stdin, return read bytes. */
   else if (fd == 0)
   {
     uint8_t *buffer_ = (uint8_t *) buffer;
@@ -225,6 +229,7 @@ read (int fd, void *buffer, unsigned size)
     lock_release(&file_lock);
     return i;
   }
+  /* If file descriptor is user's, return read bytes. */
   int result = file_read(file, buffer, size);
   lock_release(&file_lock);
   return result;
@@ -234,19 +239,23 @@ int write (int fd, const void *buffer, unsigned size)
 {
   lock_acquire(&file_lock);
   struct file *file = thread_current()->fd_table[fd];
+  /* If file descriptor is stdout, return written bytes. */
   if (fd == 1)
   {
     putbuf(buffer, size);
     lock_release(&file_lock);
     return size;
   }
+  /* If file descriptor is stdin or NULL, return -1. */
   else if (fd == 0 || file == NULL)
   {
     lock_release(&file_lock);
     return 0;
   }
+  /* Check other process using this file. */
   if (file->deny_write)
     file_deny_write(file);
+  /* If file descriptor is user's, return written bytes. */
   int result = file_write(file, buffer, size);
   lock_release(&file_lock);
   return result;

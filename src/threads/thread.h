@@ -116,8 +116,7 @@ struct thread
    struct semaphore load_sema;          /* Sema_up after child load memory no matter what he successes.
                                            Sema_down right after child is created in process_execute(). */
    bool load_success;                   /* True if load success, False if not. */
-   struct file **fd_table;              /* Table of file descriptor. index 0,1,2 has standard value, More than 2, user's. */
-   struct file *running_file;
+   struct file **fd_table;              /* Table of file descriptor. index 0,1 has standard value, More than 2, user's. */
 
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
