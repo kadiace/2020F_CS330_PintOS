@@ -252,9 +252,6 @@ int write (int fd, const void *buffer, unsigned size)
     lock_release(&file_lock);
     return 0;
   }
-  /* Check other process using this file. */
-  if (file->deny_write)
-    file_deny_write(file);
   /* If file descriptor is user's, return written bytes. */
   int result = file_write(file, buffer, size);
   lock_release(&file_lock);
