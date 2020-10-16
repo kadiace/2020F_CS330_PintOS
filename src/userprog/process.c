@@ -21,19 +21,107 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-void seperate_fn (char* fn_copy, char** fn_token)
+void
+push_args_to_stack (char** argv, int argc, void **esp)
 {
-  /* Separate  file_name by space. */
-  char* start_ptr = *fn_token;
+  // char * arg;
+  int total_len = 0;
+  int len;
+  // printf("address of esp is %d\n", *esp);
+  /* Push argv[argc-1] ~ argv[0]. */
+  for (int i = argc-1;i >= 0;i--)
+  {
+    /* Save arg[n-1]. */
+    // printf("arg: %s\n", argv[i]);
+    len = strlen(argv[i]);
+    *esp -=len + 1;
+    total_len += len + 1;
+    strlcpy(*esp, argv[i], len + 1);
+    argv[i] = *esp;
+  }
+
+  /* Push word align. */
+  if (total_len % 4 != 0)
+  {
+    *esp -= 4 - (total_len % 4);
+  }
+
+  /* push NULL. */
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+
+  /* Push address of argv[argc-1] ~ argv[0]. */
+  for (int i = argc-1;i >= 0;i--)
+  {
+    *esp -= 4;
+    **(uint32_t **)esp = argv[i];
+  }
+
+  /* Push address of argv. */
+  *esp -= 4;
+  **(uint32_t **)esp = *esp + 4;
+
+  /* Push argc. */
+  *esp -= 4;
+  **(uint32_t **)esp = argc;
+
+  /* Push return address .*/
+  *esp -= 4;
+  **(uint32_t **)esp = 0;
+
+  /* Check stack by hex_dump(). */
+  // printf("hexdump!-push arg\n");
+  // uintptr_t ofs = (uintptr_t)*esp;
+  // uintptr_t byte_size = 0xc0000000-ofs;
+  // hex_dump(ofs, *esp, byte_size, true);
+
+}
+
+int
+seperate_fn (char* fn_copy, char** fn_token)
+{
+  int i = 0;
   char* ptr;
   char* next_ptr;
-  ptr = strtok_r(fn_copy, '\n', &next_ptr);
-  while (ptr)
+  ptr = strtok_r(fn_copy, "\n", &next_ptr);
+  while (ptr != NULL)
   {
-    start_ptr = ptr;
-    start_ptr++;
-    ptr = strtok_r(NULL, " ", &next_ptr);
+    ptr = strtok_r(ptr, " ", &next_ptr);
+    if (ptr == NULL)
+      break;
+    /* Put argument in stack. */
+    *(fn_token+i) = ptr;
+    ptr = next_ptr;
+    i++;
   }
+
+  return i;
+}
+
+void
+get_command (char *command, char *file_name)
+{
+  strlcpy(command, file_name, strlen(file_name) + 1);
+  int i;
+  for (i = 0; command[i] != NULL && command[i] != ' ';i++);
+  command[i] = NULL;
+}
+
+struct thread *
+find_child(struct thread *parent, tid_t tid)
+{
+  struct list_elem *base = list_begin(&thread_current()->child_list);
+  while (base != list_tail(&parent->child_list))
+  {
+    /* If parent have child that have same tid with parameter, return. */
+    struct thread* child_thread = list_entry(base, struct thread, child_elem);
+    if (child_thread->tid == tid)
+    {
+      return child_thread;
+    }
+    base = base->next;
+  }
+  return NULL;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -44,6 +132,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char command[256];
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -53,16 +142,33 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Seperate file_name and put first argument in thread_create(). */
-  // char **buffer;
-  // buffer = malloc(strlen(file_name)+1);
-  // seperate_fn(fn_copy, buffer);
-  // printf("first of buffer is %s\n", *buffer);
+  /* Get command from fn_copy. */
+  get_command(command, file_name);
+
+  if (filesys_open(command) == NULL)
+    return -1;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  {
+    palloc_free_page (fn_copy);
+    return TID_ERROR;
+  }  
+  /* Load_sema up. */
+  struct thread *child = find_child(thread_current(), tid);
+  if (child == NULL) {
+    palloc_free_page (fn_copy);
+    return -1;
+  }
+  sema_down(&child->load_sema);
+
+  if (!child->load_success)
+    return -1;
+
+  if (tid == TID_ERROR)
+    palloc_free_page (fn_copy);
+  
   return tid;
 }
 
@@ -72,20 +178,35 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  char *command;
+  char *next_ptr;
   struct intr_frame if_;
   bool success;
+
+  /* Seperate file_name and put first argument in thread_create(). */
+  int argc = seperate_fn(file_name, &command);
+  char ** argv = &command;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (command, &if_.eip, &if_.esp);
 
+  thread_current()->load_success = success;
+
+  /* Update arguments in stack. */
+  if (success) {push_args_to_stack(argv, argc, &if_.esp);}
+
+  /* Load_sema up. */
+  sema_up(&thread_current()->load_sema);
+
+  palloc_free_page(file_name);
   /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success) {
+    exit(-1);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -109,7 +230,21 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  /* Find child of current thread. If not, return -1. */
+  struct thread *parent = thread_current();
+  struct thread *child = find_child(parent, child_tid);
+  if (child == NULL)
+  {
+    return -1;
+  }
+  /* Save status and change sema before remove child. */
+  sema_down(&child->wait_sema);
+  int status = child->exit_status;
+  list_remove(&child->child_elem);
+  sema_up(&child->exit_sema);
+
+  /* exit in */
+  return status;
 }
 
 /* Free the current process's resources. */
@@ -118,6 +253,24 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* remove files which is used by this process */
+  struct file **table = cur->fd_table;
+  for (int i = 2; i < 128; i++)
+  {
+    if (cur->fd_table[i] != NULL)
+      close(i);
+  }
+  free(cur->fd_table);
+
+  /* if process killed due to an exception, clean up the parent-child relationship. */
+  struct list_elem *base = list_begin(&cur->child_list);
+  while (base != list_tail(&cur->child_list))
+  {
+    struct thread* child = list_entry(base, struct thread, child_elem);
+    list_remove(&child->child_elem);
+    sema_up(&child->exit_sema);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -135,6 +288,10 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  
+  /* wait_sema up, exit_sema down. */
+  sema_up(&cur->wait_sema);
+  sema_down(&cur->exit_sema);
 }
 
 /* Sets up the CPU for running user code in the current

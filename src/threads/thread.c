@@ -211,13 +211,19 @@ thread_create (const char *name, int priority,
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
-  if (t == NULL)
+  if (t == NULL) 
+  {
     return TID_ERROR;
-
+  }
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
+  t->fd_table = calloc(128, sizeof(struct file*));
+  if (t->fd_table == NULL)
+  {
+    palloc_free_page(t);
+    return TID_ERROR;
+  }
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -588,6 +594,19 @@ init_thread (struct thread *t, const char *name, int priority)
   t->orizin = false;
   t->origin_priority = 0;  /* 0 means this thread isn't donated yet. */
   list_init (&t->donated);
+
+#ifdef USERPROG
+  /* These variables are made for project2 : user process. */
+  t->exit_status = 1;
+  t->running_file = NULL;
+  list_init (&t->child_list);
+  sema_init (&t->exit_sema, 0);
+  sema_init (&t->wait_sema, 0);
+  sema_init (&t->load_sema, 0);
+  t->load_success = false;
+  if (running_thread()->status == THREAD_RUNNING)
+    list_push_back(&running_thread()->child_list, &t->child_elem);
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
