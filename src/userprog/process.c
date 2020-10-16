@@ -149,9 +149,6 @@ process_execute (const char *file_name)
   /* Get command from file_name. */
   get_command(command, file_name);
 
-  if (filesys_open(command) == NULL)
-    return -1;
-
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
 
