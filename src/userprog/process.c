@@ -202,7 +202,7 @@ start_process (void *file_name_)
   /* Load_sema up. */
   sema_up(&thread_current()->load_sema);
 
-  palloc_free_page(file_name);
+  palloc_free_page(file_name_);
   /* If load failed, quit. */
   if (!success) {
     exit(-1);
@@ -264,12 +264,13 @@ process_exit (void)
   free(cur->fd_table);
 
   /* if process killed due to an exception, clean up the parent-child relationship. */
+  struct thread* child;
   struct list_elem *base = list_begin(&cur->child_list);
   while (base != list_tail(&cur->child_list))
   {
-    struct thread* child = list_entry(base, struct thread, child_elem);
-    list_remove(&child->child_elem);
+    child = list_entry(base, struct thread, child_elem);
     sema_up(&child->exit_sema);
+    base = list_remove(&child->child_elem);
   }
 
   /* Destroy the current process's page directory and switch back
