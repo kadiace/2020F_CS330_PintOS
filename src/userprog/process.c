@@ -170,7 +170,10 @@ process_execute (const char *file_name)
 
   /* If child fail to load memory, exit. */
   if (!child->load_success)
+  {
+    palloc_free_page(fn_copy);
     return -1;
+  }
   
   /* Free fn_copy and return child's tid to wait for him. */
   palloc_free_page (fn_copy);
