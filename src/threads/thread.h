@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -103,6 +104,20 @@ struct thread
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
+    /* These variables are made for project2 : user process. */
+   int exit_status;                     /* Status which thread has been terminated, 0 = terminated successfully,
+                                           1 = not terminated yet, -1 = terminated by kernel. */
+   struct list child_list;              /* List of child. Push children when they create. Remove all elements
+                                           when parent process exit.*/
+   struct list_elem child_elem;         /* Element of child. */
+   struct semaphore wait_sema;          /* Sema_up when child process exit. Sema_down when parent's wait() occur. */
+   struct semaphore exit_sema;          /* Sema_up after parent remove his child in child_list.
+                                           Sema_down before child process exit.*/
+   struct semaphore load_sema;          /* Sema_up after child load memory no matter what he successes.
+                                           Sema_down right after child is created in process_execute(). */
+   bool load_success;                   /* True if load success, False if not. */
+   struct file **fd_table;              /* Table of file descriptor. index 0,1 has standard value, More than 2, user's. */
+
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
