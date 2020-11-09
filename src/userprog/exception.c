@@ -2,9 +2,11 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -109,6 +111,8 @@ kill (struct intr_frame *f)
     }
 }
 
+bool check_stack(uint32_t addr, uint32_t esp);
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -127,6 +131,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  bool load = false;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -149,20 +154,29 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* If user program try to access kernel area, exit(-1). */
-  if (!user || is_kernel_vaddr(fault_addr) || not_present)
-  {
-     exit(-1);
-  }
+  /* If not_present is false, exit(-1). */
+  if (!user || !not_present)
+    exit(-1);
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+  /* Check fault addr is valid addr. */
+  struct spte *vm_entry = check_valid_addr (fault_addr);
+
+  /* If addr is not presented, handle fault addr. */
+  if (not_present)
+  {
+    if (vm_entry == NULL)
+    {
+      /* Check stack condition. If stack has problem, grow. */
+      if (f->esp - fault_addr > 32 || 0xC0000000UL - (uint32_t)fault_addr > 8 * 1024 * 1024)
+        exit(-1);
+
+      /* Stack growth. */
+      if (!stack_growth(fault_addr))
+        exit(-1);
+    }
+    else if (!handle_pf(vm_entry))
+      exit(-1);
+  }
 }
+
 

@@ -2,6 +2,7 @@
 #define USERPROG_SYSCALL_H
 #include "lib/user/syscall.h"
 #include "threads/synch.h"
+#include "vm/page.h"
 
 void syscall_init (void);
 

@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "filesys/off_t.h"
+#include "vm/page.h"
 
 /* Take struct file to use deny_write at open(), write(). */
 struct file 
@@ -80,17 +81,16 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
 
     case SYS_READ :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
-      check_esp(f->esp + 12);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_buffer ((void *) *(uint32_t *)(f->esp + 8), (unsigned) *((uint32_t *)(f->esp + 12)), f->esp, true);
+      // printf("SYS_READ() : check success.\n");
       f->eax = read ((int) *(uint32_t *)(f->esp + 4), (void *) *(uint32_t *)(f->esp + 8),
         (unsigned) *((uint32_t *)(f->esp + 12)));
       break;
 
     case SYS_WRITE :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
-      check_esp(f->esp + 12);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_buffer ((void *) *(uint32_t *)(f->esp + 8), (unsigned) *((uint32_t *)(f->esp + 12)), f->esp, false);
       f->eax = write ((int) *(uint32_t *)(f->esp + 4), (void *) *(uint32_t *)(f->esp + 8), 
         (unsigned) *((uint32_t *)(f->esp + 12)));
       break;
@@ -164,8 +164,9 @@ int
 open (const char *file)
 {
   if (file == NULL)
+  {
     return -1;
-
+  }
   lock_acquire(&file_lock);
   /* Change file type to struct file *. */
   struct file *result = filesys_open(file);
