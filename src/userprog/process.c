@@ -17,6 +17,9 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
+#include "vm/frame.h"
+
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -151,7 +154,6 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
-
   /* If child has problem, return -1. */
   if (tid == TID_ERROR)
   {
@@ -174,7 +176,6 @@ process_execute (const char *file_name)
     palloc_free_page(fn_copy);
     return -1;
   }
-  
   /* Free fn_copy and return child's tid to wait for him. */
   palloc_free_page (fn_copy);
   return tid;
@@ -190,10 +191,12 @@ start_process (void *file_name_)
   char *next_ptr;
   struct intr_frame if_;
   bool success;
-
   /* Seperate file_name and put first argument in thread_create(). */
   int argc = seperate_fn(file_name, &command);
   char ** argv = &command;
+
+  /* Initialize spt. */
+  spt_init (&thread_current()->spt);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -214,7 +217,6 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   if (!success)
     exit(-1);
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -295,6 +297,10 @@ process_exit (void)
       pagedir_destroy (pd);
     }
   
+  /* Free spt. */
+  spt_destroy(&thread_current()->spt);
+  free_frame_table (thread_current());
+
   /* wait_sema up, exit_sema down. */
   sema_up(&cur->wait_sema);
   sema_down(&cur->exit_sema);
@@ -580,31 +586,44 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
+      /* Make spte, insert at spt. */
+      struct spte *spte = (struct spte *)calloc (1, sizeof (struct spte));
+      if (spte == NULL)
         return false;
+      memset (spte, 0, sizeof(struct spte));
+      spte->type = EXEC_FILE;
+      spte->vaddr = upage;
+      spte->writable = writable;
+      spte->is_loaded = true;
+      spte->file = file;
+      spte->offset = ofs;
+      spte->read_bytes = page_read_bytes;
+      spte->zero_bytes = page_zero_bytes;
+      insert_spte (&thread_current()->spt, spte);
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+      /* Get a page of memory. */
+      struct fte *frame = alloc_fte (PAL_USER, spte);
+      if (frame == NULL)
+        return false;
+      if (file_read (spte->file, frame->kaddr, spte->read_bytes) != (int) spte->read_bytes)
+      {
+        free_frame_perfect (frame);
+        return false;
+      }
+      memset (frame->kaddr + spte->read_bytes, 0, spte->zero_bytes);
+      if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
+      {
+        free_frame_perfect (frame);
+        return false;
+      }
+      spte->type = MEMORY;
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
     }
+    
   return true;
 }
 
@@ -613,19 +632,46 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
+  /* Set vaddr, spte, fte. */
+  uint8_t *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  struct spte *spte = calloc(1, sizeof (struct spte));
+  struct fte *frame = alloc_fte ((PAL_USER | PAL_ZERO), spte);
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  /* Insert stack at physical memory. */
+  if (spte == NULL)
+  {
+    free_frame_perfect (frame);
+    return false;
+  }
+  if (frame != NULL) 
+  {
+    if (install_page (upage, frame->kaddr, true))
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
+      *esp = PHYS_BASE;
+
+      spte->type = STACK;
+      spte->vaddr = upage;
+      spte->writable = true;
+      spte->is_loaded = true;
+
+      if (!insert_spte (&thread_current()->spt, spte))
+      {
+        free_frame_perfect (frame);
+        return false;
+      }
     }
-  return success;
+    else
+    {
+      free_frame_perfect (frame);
+      return false;
+    }
+  }
+  else
+  {
+    free_frame_perfect (frame);
+    return false;
+  }
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
@@ -646,4 +692,80 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+bool
+handle_pf(struct spte *spte)
+{
+  /* Make fte. */
+  struct fte *frame = alloc_fte (PAL_USER, spte);
+  if (frame == NULL)
+    return false;
+  
+  /* Divide situation by sp type. */
+  uint8_t type = frame->spte->type;
+  if (type == EXEC_FILE)
+  {
+    /* Load file at physical memory. */
+    if (!load_file(frame->kaddr, spte) || !install_page(frame->spte->vaddr, frame->kaddr, frame->spte->writable))
+    {
+      free_frame (frame);
+      return false;
+    }
+    frame->spte->type = MEMORY;
+  }
+  else if (type == SWAP_DISK)
+  {
+    /* Swap in physical memory, and load file at physical memory. */
+    swap_in(frame->spte->swap_location, frame->kaddr);
+    if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
+    {
+      free_frame_perfect (frame);
+      return false;
+    }
+    frame->spte->type = MEMORY;
+  }
+  return true;
+}
+
+bool stack_growth(uint32_t addr)
+{
+  /* Set vaddr, spte, fte. */
+  uint8_t *upage = pg_round_down(addr);
+  struct spte *spte = calloc(1, sizeof (struct spte));
+  struct fte *frame = alloc_fte ((PAL_USER | PAL_ZERO), spte);
+
+  /* Insert additional stack at physical memory. */
+  if (spte == NULL)
+  {
+    free_frame_perfect (frame);
+    return false;
+  }
+  if (frame != NULL) 
+  {
+    if (install_page (upage, frame->kaddr, true))
+    {
+      spte->type = STACK;
+      spte->vaddr = upage;
+      spte->writable = true;
+      spte->is_loaded = true;
+
+      if (!insert_spte (&thread_current()->spt, spte))
+      {
+        free_frame_perfect (frame);
+        return false;
+      }
+    }
+    else
+    {
+      free_frame_perfect (frame);
+      return false;
+    }
+  }
+  else
+  {
+    free_frame_perfect (frame);
+    return false;
+  }
+  return true;
 }

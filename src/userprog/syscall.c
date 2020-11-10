@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "filesys/off_t.h"
+#include "vm/page.h"
 
 /* Take struct file to use deny_write at open(), write(). */
 struct file 
@@ -44,70 +45,68 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
 
     case SYS_EXIT :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       exit (*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_EXEC :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = exec ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_WAIT :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = wait ((pid_t)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_CREATE :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_string (f->esp + 8, f->esp);
       f->eax = create ((const char *)*(uint32_t *)(f->esp + 4), (unsigned)*(uint32_t *)(f->esp + 8));
       break;
 
     case SYS_REMOVE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = remove ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_OPEN :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = open ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_FILESIZE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = filesize ((int) *(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_READ :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
-      check_esp(f->esp + 12);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_buffer ((void *) *(uint32_t *)(f->esp + 8), (unsigned) *((uint32_t *)(f->esp + 12)), f->esp, true);
       f->eax = read ((int) *(uint32_t *)(f->esp + 4), (void *) *(uint32_t *)(f->esp + 8),
         (unsigned) *((uint32_t *)(f->esp + 12)));
       break;
 
     case SYS_WRITE :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
-      check_esp(f->esp + 12);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_buffer ((void *) *(uint32_t *)(f->esp + 8), (unsigned) *((uint32_t *)(f->esp + 12)), f->esp, false);
       f->eax = write ((int) *(uint32_t *)(f->esp + 4), (void *) *(uint32_t *)(f->esp + 8), 
         (unsigned) *((uint32_t *)(f->esp + 12)));
       break;
 
     case SYS_SEEK :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_string (f->esp + 8, f->esp);
       seek ((int) *(uint32_t *)(f->esp + 4), (unsigned) *((uint32_t *)(f->esp + 8)));
       break;
 
     case SYS_TELL :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = tell ((int) *(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_CLOSE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       close ((int) *(uint32_t *)(f->esp + 4));
       break;
   }
@@ -164,8 +163,9 @@ int
 open (const char *file)
 {
   if (file == NULL)
+  {
     return -1;
-
+  }
   lock_acquire(&file_lock);
   /* Change file type to struct file *. */
   struct file *result = filesys_open(file);
