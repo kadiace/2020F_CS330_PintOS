@@ -30,13 +30,13 @@ struct spte
   size_t swap_location;
 };
 
-void vm_init (struct hash *vm);
-bool insert_vm_entry (struct hash *vm_table, struct spte *vm_entry);
-bool delete_vm_entry (struct hash *vm_table, struct spte *vm_entry);
-struct spte *find_vm_entry (void *vaddr);
-void vm_destroy (struct hash *vm_table);
+void spt_init (struct hash *spt);
+bool insert_spte (struct hash *spt, struct spte *spte);
+bool delete_spte (struct hash *spt, struct spte *spte);
+struct spte *find_spte (void *vaddr);
+void spt_destroy (struct hash *spt);
 void check_valid_buffer (void *buffer, unsigned size, void *esp, bool is_writable);
 void check_valid_string (void * string, void *esp);
-bool load_file (void *kaddr, struct spte *vme);
+bool load_file (void *kaddr, struct spte *spte);
 
 #endif /* vm/page.h */

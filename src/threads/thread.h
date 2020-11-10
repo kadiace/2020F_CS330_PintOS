@@ -124,7 +124,7 @@ struct thread
 #endif
 
     /* These variables are made for project3-1 : virtual memory. */
-    struct hash vm_table;
+    struct hash spt;                    /* Suppliment page table. */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

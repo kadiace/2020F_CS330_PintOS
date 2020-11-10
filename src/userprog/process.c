@@ -195,8 +195,8 @@ start_process (void *file_name_)
   int argc = seperate_fn(file_name, &command);
   char ** argv = &command;
 
-  /* Initialize vm_table. */
-  vm_init (&thread_current()->vm_table);
+  /* Initialize spt. */
+  spt_init (&thread_current()->spt);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -297,8 +297,8 @@ process_exit (void)
       pagedir_destroy (pd);
     }
   
-  /* Free vm_table. */
-  vm_destroy(&thread_current()->vm_table);
+  /* Free spt. */
+  spt_destroy(&thread_current()->spt);
   free_frame_table (thread_current());
 
   /* wait_sema up, exit_sema down. */
@@ -586,37 +586,37 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Make spte, insert at vm_table. */
-      struct spte *vm_entry = (struct spte *)calloc (1, sizeof (struct spte));
-      if (vm_entry == NULL)
+      /* Make spte, insert at spt. */
+      struct spte *spte = (struct spte *)calloc (1, sizeof (struct spte));
+      if (spte == NULL)
         return false;
-      memset (vm_entry, 0, sizeof(struct spte));
-      vm_entry->type = EXEC_FILE;
-      vm_entry->vaddr = upage;
-      vm_entry->writable = writable;
-      vm_entry->is_loaded = true;
-      vm_entry->file = file;
-      vm_entry->offset = ofs;
-      vm_entry->read_bytes = page_read_bytes;
-      vm_entry->zero_bytes = page_zero_bytes;
-      insert_vm_entry (&thread_current()->vm_table, vm_entry);
+      memset (spte, 0, sizeof(struct spte));
+      spte->type = EXEC_FILE;
+      spte->vaddr = upage;
+      spte->writable = writable;
+      spte->is_loaded = true;
+      spte->file = file;
+      spte->offset = ofs;
+      spte->read_bytes = page_read_bytes;
+      spte->zero_bytes = page_zero_bytes;
+      insert_spte (&thread_current()->spt, spte);
 
       /* Get a page of memory. */
-      struct fte *frame = alloc_frame (PAL_USER, vm_entry);
+      struct fte *frame = alloc_fte (PAL_USER, spte);
       if (frame == NULL)
         return false;
-      if (file_read (vm_entry->file, frame->kaddr, vm_entry->read_bytes) != (int) vm_entry->read_bytes)
+      if (file_read (spte->file, frame->kaddr, spte->read_bytes) != (int) spte->read_bytes)
       {
         free_frame_perfect (frame);
         return false;
       }
-      memset (frame->kaddr + vm_entry->read_bytes, 0, vm_entry->zero_bytes);
-      if (!install_page(vm_entry->vaddr, frame->kaddr, vm_entry->writable))
+      memset (frame->kaddr + spte->read_bytes, 0, spte->zero_bytes);
+      if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
       {
         free_frame_perfect (frame);
         return false;
       }
-      vm_entry->type = MEMORY;
+      spte->type = MEMORY;
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -632,10 +632,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+  /* Set vaddr, spte, fte. */
   uint8_t *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
-  struct spte *vm_entry = calloc(1, sizeof (struct spte));
-  struct fte *frame = alloc_frame ((PAL_USER | PAL_ZERO), vm_entry);
-  if (vm_entry == NULL)
+  struct spte *spte = calloc(1, sizeof (struct spte));
+  struct fte *frame = alloc_fte ((PAL_USER | PAL_ZERO), spte);
+
+  /* Insert stack at physical memory. */
+  if (spte == NULL)
   {
     free_frame_perfect (frame);
     return false;
@@ -646,12 +649,12 @@ setup_stack (void **esp)
     {
       *esp = PHYS_BASE;
 
-      vm_entry->type = STACK;
-      vm_entry->vaddr = upage;
-      vm_entry->writable = true;
-      vm_entry->is_loaded = true;
+      spte->type = STACK;
+      spte->vaddr = upage;
+      spte->writable = true;
+      spte->is_loaded = true;
 
-      if (!insert_vm_entry (&thread_current()->vm_table, vm_entry))
+      if (!insert_spte (&thread_current()->spt, spte))
       {
         free_frame_perfect (frame);
         return false;
@@ -692,41 +695,48 @@ install_page (void *upage, void *kpage, bool writable)
 }
 
 bool
-handle_pf(struct spte *vm_entry)
+handle_pf(struct spte *spte)
 {
-  struct fte *frame = alloc_frame (PAL_USER, vm_entry);
+  /* Make fte. */
+  struct fte *frame = alloc_fte (PAL_USER, spte);
   if (frame == NULL)
     return false;
-  uint8_t type = frame->vme->type;
+  
+  /* Divide situation by sp type. */
+  uint8_t type = frame->spte->type;
   if (type == EXEC_FILE)
   {
-    if (!load_file(frame->kaddr, vm_entry) || !install_page(frame->vme->vaddr, frame->kaddr, frame->vme->writable))
+    /* Load file at physical memory. */
+    if (!load_file(frame->kaddr, spte) || !install_page(frame->spte->vaddr, frame->kaddr, frame->spte->writable))
     {
       free_frame (frame);
       return false;
     }
-    frame->vme->type = MEMORY;
+    frame->spte->type = MEMORY;
   }
   else if (type == SWAP_DISK)
   {
-    swap_in(frame->vme->swap_location, frame->kaddr);
-    if (!install_page(vm_entry->vaddr, frame->kaddr, vm_entry->writable))
+    /* Swap in physical memory, and load file at physical memory. */
+    swap_in(frame->spte->swap_location, frame->kaddr);
+    if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
     {
       free_frame_perfect (frame);
       return false;
     }
-    frame->vme->type = MEMORY;
+    frame->spte->type = MEMORY;
   }
   return true;
 }
 
 bool stack_growth(uint32_t addr)
 {
+  /* Set vaddr, spte, fte. */
   uint8_t *upage = pg_round_down(addr);
-  struct spte *vm_entry = calloc(1, sizeof (struct spte));
-  struct fte *frame = alloc_frame ((PAL_USER | PAL_ZERO), vm_entry);
+  struct spte *spte = calloc(1, sizeof (struct spte));
+  struct fte *frame = alloc_fte ((PAL_USER | PAL_ZERO), spte);
 
-  if (vm_entry == NULL)
+  /* Insert additional stack at physical memory. */
+  if (spte == NULL)
   {
     free_frame_perfect (frame);
     return false;
@@ -735,12 +745,12 @@ bool stack_growth(uint32_t addr)
   {
     if (install_page (upage, frame->kaddr, true))
     {
-      vm_entry->type = STACK;
-      vm_entry->vaddr = upage;
-      vm_entry->writable = true;
-      vm_entry->is_loaded = true;
+      spte->type = STACK;
+      spte->vaddr = upage;
+      spte->writable = true;
+      spte->is_loaded = true;
 
-      if (!insert_vm_entry (&thread_current()->vm_table, vm_entry))
+      if (!insert_spte (&thread_current()->spt, spte))
       {
         free_frame_perfect (frame);
         return false;

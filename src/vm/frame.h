@@ -3,19 +3,20 @@
 
 #include <debug.h>
 #include <list.h>
+#include "threads/palloc.h"
 #include "vm/page.h"
 
 struct fte
 {
   void *kaddr;
-  struct spte *vme;
+  struct spte *spte;
   struct thread *thread;
 
   struct list_elem elem;
 };
 
-void frame_init(void);
-// struct fte * alloc_frame (enum palloc_flags flag, struct spte * vm_entry);
+void frame_init (void);
+struct fte * alloc_fte (enum palloc_flags flag, struct spte * spte);
 struct list * get_frame_table (void);
 void free_frame_perfect (struct fte* frame);
 void free_frame (struct fte* frame);

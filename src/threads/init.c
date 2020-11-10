@@ -116,6 +116,7 @@ main (void)
   syscall_init ();
 #endif
 
+  /* Initialize frame, swap table. */
   frame_init();
   swap_init(8 * 1024);
 

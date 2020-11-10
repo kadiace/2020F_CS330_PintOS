@@ -159,12 +159,12 @@ page_fault (struct intr_frame *f)
     exit(-1);
 
   /* Check fault addr is valid addr. */
-  struct spte *vm_entry = check_valid_addr (fault_addr);
+  struct spte *spte = check_valid_addr (fault_addr);
 
   /* If addr is not presented, handle fault addr. */
   if (not_present)
   {
-    if (vm_entry == NULL)
+    if (spte == NULL)
     {
       /* Check stack condition. If stack has problem, grow. */
       if (f->esp - fault_addr > 32 || 0xC0000000UL - (uint32_t)fault_addr > 8 * 1024 * 1024)
@@ -174,7 +174,7 @@ page_fault (struct intr_frame *f)
       if (!stack_growth(fault_addr))
         exit(-1);
     }
-    else if (!handle_pf(vm_entry))
+    else if (!handle_pf(spte))
       exit(-1);
   }
 }

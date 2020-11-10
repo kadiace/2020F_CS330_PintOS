@@ -26,30 +26,31 @@ frame_init()
 }
 
 struct fte *
-alloc_frame (enum palloc_flags flag, struct spte *vm_entry)
+alloc_fte (enum palloc_flags flag, struct spte *spte)
 {
   struct fte *frame = (struct fte *)calloc(1, sizeof(struct fte));
   if (frame == NULL)
     return NULL;
-  frame->vme = vm_entry;
+  frame->spte = spte;
   frame->thread = thread_current();
   frame->kaddr = palloc_get_page(flag);
 
-  /* Swap 구현할때는 while loop 통해서 성공할때까지 disk 검색 후 정리, palloc_get_page() */
+  /* Swap out victim while succeed it, and palloc_get_page() */
   while (frame->kaddr == NULL)
   {
     /* Find victim and swap out him. */
     struct fte *victim_frame = find_victim();
-    // while (victim_frame->vme->type == STACK)
-    //   victim_frame = find_victim();
-    struct spte *sp = victim_frame->vme;
-    sp->type = SWAP_DISK;
-    sp->is_loaded = false;
-    if (pagedir_is_accessed (victim_frame->thread->pagedir, sp->vaddr))
-      pagedir_set_accessed (victim_frame->thread->pagedir, sp->vaddr, false);
-    pagedir_clear_page (victim_frame->thread->pagedir, victim_frame->vme->vaddr);
-    sp->swap_location = swap_out(victim_frame->kaddr);
+    struct spte *spte = victim_frame->spte;
+    spte->type = SWAP_DISK;
+    spte->is_loaded = false;
+
+    /* Clear pagedir. */
+    if (pagedir_is_accessed (victim_frame->thread->pagedir, spte->vaddr))
+      pagedir_set_accessed (victim_frame->thread->pagedir, spte->vaddr, false);
+    pagedir_clear_page (victim_frame->thread->pagedir, victim_frame->spte->vaddr);
+    spte->swap_location = swap_out(victim_frame->kaddr);
     free_frame (victim_frame);
+
     /* Get page. */
     frame->kaddr = palloc_get_page(flag);
   }
@@ -62,10 +63,11 @@ alloc_frame (enum palloc_flags flag, struct spte *vm_entry)
 void
 free_frame_perfect (struct fte* frame)
 {
+  /* Free frame and spte. */
   lock_acquire(&frame_lock);
-  while(!delete_vm_entry(&frame->thread->vm_table, frame->vme));
+  while(!delete_spte(&frame->thread->spt, frame->spte));
   list_remove(&frame->elem);
-  free(frame->vme);
+  free(frame->spte);
   palloc_free_page(frame->kaddr);
   free(frame);
   lock_release(&frame_lock);
@@ -74,6 +76,7 @@ free_frame_perfect (struct fte* frame)
 void
 free_frame (struct fte* frame)
 {
+  /* Free frame. */
   lock_acquire(&frame_lock);
   list_remove(&frame->elem);
   palloc_free_page(frame->kaddr);
@@ -84,6 +87,7 @@ free_frame (struct fte* frame)
 void
 free_frame_table (struct thread* thread)
 {
+  /* Free frame table. */
   lock_acquire(&frame_lock);
   struct list_elem *base = list_begin(&frame_table);
   struct fte *base_frame;
@@ -105,6 +109,7 @@ free_frame_table (struct thread* thread)
 struct fte *
 find_victim(void)
 {
+  /* Find victime with FIFO method, and return. */
   struct fte *victim;
   lock_acquire(&frame_lock);
   struct list_elem *evict_elem = list_pop_front(&frame_table);

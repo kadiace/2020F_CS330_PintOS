@@ -45,45 +45,44 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
 
     case SYS_EXIT :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       exit (*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_EXEC :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = exec ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_WAIT :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = wait ((pid_t)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_CREATE :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_string (f->esp + 8, f->esp);
       f->eax = create ((const char *)*(uint32_t *)(f->esp + 4), (unsigned)*(uint32_t *)(f->esp + 8));
       break;
 
     case SYS_REMOVE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = remove ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_OPEN :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = open ((const char *)*(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_FILESIZE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = filesize ((int) *(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_READ :
       check_valid_string (f->esp + 4, f->esp);
       check_valid_buffer ((void *) *(uint32_t *)(f->esp + 8), (unsigned) *((uint32_t *)(f->esp + 12)), f->esp, true);
-      // printf("SYS_READ() : check success.\n");
       f->eax = read ((int) *(uint32_t *)(f->esp + 4), (void *) *(uint32_t *)(f->esp + 8),
         (unsigned) *((uint32_t *)(f->esp + 12)));
       break;
@@ -96,18 +95,18 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
 
     case SYS_SEEK :
-      check_esp(f->esp + 4);
-      check_esp(f->esp + 8);
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_string (f->esp + 8, f->esp);
       seek ((int) *(uint32_t *)(f->esp + 4), (unsigned) *((uint32_t *)(f->esp + 8)));
       break;
 
     case SYS_TELL :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       f->eax = tell ((int) *(uint32_t *)(f->esp + 4));
       break;
 
     case SYS_CLOSE :
-      check_esp(f->esp + 4);
+      check_valid_string (f->esp + 4, f->esp);
       close ((int) *(uint32_t *)(f->esp + 4));
       break;
   }
