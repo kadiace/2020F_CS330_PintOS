@@ -123,8 +123,10 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
-    /* These variables are made for project3-1 : virtual memory. */
+    /* These variables are made for project3 : virtual memory. */
     struct hash spt;                    /* Suppliment page table. */
+    int map_id;                         /* ID for mmap. */
+    struct list mmap_list;              /* List of memory mapping files. */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

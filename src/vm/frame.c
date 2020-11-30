@@ -10,7 +10,8 @@
 #include "userprog/process.h"
 
 static struct list frame_table;
-static struct lock frame_lock;
+struct lock frame_lock;
+extern struct lock file_lock;
 
 struct list *
 get_frame_table(void)
@@ -40,17 +41,17 @@ alloc_fte (enum palloc_flags flag, struct spte *spte)
   {
     /* Find victim and swap out him. */
     struct fte *victim_frame = find_victim();
-    struct spte *spte = victim_frame->spte;
-    spte->type = SWAP_DISK;
-    spte->is_loaded = false;
+    struct spte *victim_spte = victim_frame->spte;
+    victim_spte->type = SWAP_DISK;
 
     /* Clear pagedir. */
-    if (pagedir_is_accessed (victim_frame->thread->pagedir, spte->vaddr))
-      pagedir_set_accessed (victim_frame->thread->pagedir, spte->vaddr, false);
-    pagedir_clear_page (victim_frame->thread->pagedir, victim_frame->spte->vaddr);
-    spte->swap_location = swap_out(victim_frame->kaddr);
+    if (pagedir_is_accessed(victim_frame->thread->pagedir, victim_spte->vaddr))
+      pagedir_set_accessed(victim_frame->thread->pagedir, victim_spte->vaddr, false);
+    if (pagedir_is_dirty(victim_frame->thread->pagedir, victim_spte->vaddr))
+      pagedir_set_dirty(victim_frame->thread->pagedir, victim_spte->vaddr, false);
+    pagedir_clear_page(victim_frame->thread->pagedir, victim_frame->spte->vaddr);
+    victim_spte->swap_location = swap_out(victim_frame->kaddr);
     free_frame (victim_frame);
-
     /* Get page. */
     frame->kaddr = palloc_get_page(flag);
   }
@@ -63,11 +64,21 @@ alloc_fte (enum palloc_flags flag, struct spte *spte)
 void
 free_frame_perfect (struct fte* frame)
 {
+  if (frame->spte->type == MMAP_FILE && pagedir_is_dirty(frame->thread->pagedir, frame->spte->vaddr))
+  {
+    lock_acquire(&file_lock);
+    file_write_at(frame->spte->file, frame->spte->vaddr, frame->spte->read_bytes, frame->spte->offset);
+    lock_release(&file_lock);
+  }
+  /* Clear pagedir. */
+  if (pagedir_is_accessed(frame->thread->pagedir, frame->spte->vaddr))
+    pagedir_set_accessed(frame->thread->pagedir, frame->spte->vaddr, false);
+  pagedir_clear_page(frame->thread->pagedir, frame->spte->vaddr);
+
   /* Free frame and spte. */
   lock_acquire(&frame_lock);
-  while(!delete_spte(&frame->thread->spt, frame->spte));
+  delete_spte(&frame->thread->spt, frame->spte);
   list_remove(&frame->elem);
-  free(frame->spte);
   palloc_free_page(frame->kaddr);
   free(frame);
   lock_release(&frame_lock);
@@ -90,18 +101,19 @@ free_frame_table (struct thread* thread)
   /* Free frame table. */
   lock_acquire(&frame_lock);
   struct list_elem *base = list_begin(&frame_table);
+  struct list_elem * temp;
   struct fte *base_frame;
-  while (base == list_tail(&frame_table))
+  while (base != list_tail(&frame_table))
   {
+    temp = base->next;
     base_frame = list_entry(base, struct fte, elem);
     if (base_frame->thread == thread)
     {
-      palloc_free_page(base_frame->kaddr);
-      free(base_frame);
-      base = list_remove(base);
+      lock_release(&frame_lock);
+      free_frame_perfect(base_frame);
+      lock_acquire(&frame_lock);
     }
-    else
-      base = base->next;
+    base = temp;
   }
   lock_release(&frame_lock);
 }
@@ -112,8 +124,16 @@ find_victim(void)
   /* Find victime with FIFO method, and return. */
   struct fte *victim;
   lock_acquire(&frame_lock);
+  lock_acquire(&file_lock);
   struct list_elem *evict_elem = list_pop_front(&frame_table);
-  list_push_back(&frame_table, evict_elem);
+
+  /* Except mmap file. */
+  while (list_entry(evict_elem, struct fte, elem)->spte->type == MMAP_FILE)
+  {
+    list_push_back(&frame_table, evict_elem);
+    evict_elem = list_pop_front(&frame_table);
+  }
+  lock_release(&file_lock);
   lock_release(&frame_lock);
   return list_entry(evict_elem, struct fte, elem);
 }

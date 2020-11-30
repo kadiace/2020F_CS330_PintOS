@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 #include "vm/page.h"
 #include "vm/frame.h"
 
@@ -261,6 +262,13 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  /* Clean mmap_file */
+  munmap(CLOSE_ALL);
+
+  /* Free spt. */
+  free_frame_table(thread_current());
+  spt_destroy(&thread_current()->spt);
+
   /* remove files which is used by current process */
   struct file **table = cur->fd_table;
   for (int i = 2; i < 128; i++)
@@ -296,10 +304,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  
-  /* Free spt. */
-  spt_destroy(&thread_current()->spt);
-  free_frame_table (thread_current());
 
   /* wait_sema up, exit_sema down. */
   sema_up(&cur->wait_sema);
@@ -391,6 +395,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+extern struct lock file_lock;
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -411,13 +417,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  lock_acquire(&file_lock);
+
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
     {
+      lock_release(&file_lock);
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  
+  lock_release(&file_lock);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -594,34 +605,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       spte->type = EXEC_FILE;
       spte->vaddr = upage;
       spte->writable = writable;
-      spte->is_loaded = true;
-      spte->file = file;
+      spte->is_loaded = false;
+      spte->file = file_reopen(file);
       spte->offset = ofs;
       spte->read_bytes = page_read_bytes;
       spte->zero_bytes = page_zero_bytes;
       insert_spte (&thread_current()->spt, spte);
 
-      /* Get a page of memory. */
-      struct fte *frame = alloc_fte (PAL_USER, spte);
-      if (frame == NULL)
-        return false;
-      if (file_read (spte->file, frame->kaddr, spte->read_bytes) != (int) spte->read_bytes)
-      {
-        free_frame_perfect (frame);
-        return false;
-      }
-      memset (frame->kaddr + spte->read_bytes, 0, spte->zero_bytes);
-      if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
-      {
-        free_frame_perfect (frame);
-        return false;
-      }
-      spte->type = MEMORY;
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
     }
     
   return true;
@@ -649,7 +644,7 @@ setup_stack (void **esp)
     {
       *esp = PHYS_BASE;
 
-      spte->type = STACK;
+      spte->type = MEMORY;
       spte->vaddr = upage;
       spte->writable = true;
       spte->is_loaded = true;
@@ -695,24 +690,54 @@ install_page (void *upage, void *kpage, bool writable)
 }
 
 bool
+load_file (struct fte *frame, struct spte *spte)
+{
+  /* Get a page of memory. */
+  if (spte->read_bytes != 0)
+  {
+    if (file_read_at (spte->file, frame->kaddr, spte->read_bytes, spte->offset) != (int) spte->read_bytes)
+      return false;
+  }
+
+  /* Memory set 0. */
+  memset (frame->kaddr + spte->read_bytes, 0, spte->zero_bytes);
+
+  /* Install page. */
+  if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
+    return false;
+  return true;
+}
+
+bool
 handle_pf(struct spte *spte)
 {
   /* Make fte. */
   struct fte *frame = alloc_fte (PAL_USER, spte);
   if (frame == NULL)
     return false;
-  
+
   /* Divide situation by sp type. */
   uint8_t type = frame->spte->type;
   if (type == EXEC_FILE)
   {
     /* Load file at physical memory. */
-    if (!load_file(frame->kaddr, spte) || !install_page(frame->spte->vaddr, frame->kaddr, frame->spte->writable))
+    if (!load_file(frame, spte))
     {
       free_frame (frame);
       return false;
     }
+    frame->spte->is_loaded = true;
     frame->spte->type = MEMORY;
+  }
+  else if (type == MMAP_FILE)
+  {
+    /* Load file at physical memory. */
+    if (!load_file(frame, spte))
+    {
+      free_frame (frame);
+      return false;
+    }
+    frame->spte->is_loaded = true;
   }
   else if (type == SWAP_DISK)
   {
@@ -720,7 +745,7 @@ handle_pf(struct spte *spte)
     swap_in(frame->spte->swap_location, frame->kaddr);
     if (!install_page(spte->vaddr, frame->kaddr, spte->writable))
     {
-      free_frame_perfect (frame);
+      free_frame (frame);
       return false;
     }
     frame->spte->type = MEMORY;
@@ -745,7 +770,7 @@ bool stack_growth(uint32_t addr)
   {
     if (install_page (upage, frame->kaddr, true))
     {
-      spte->type = STACK;
+      spte->type = MEMORY;
       spte->vaddr = upage;
       spte->writable = true;
       spte->is_loaded = true;
