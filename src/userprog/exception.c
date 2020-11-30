@@ -154,12 +154,9 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* If not_present is false, exit(-1). */
-  if (!user || !not_present)
-    exit(-1);
-
   /* Check fault addr is valid addr. */
   struct spte *spte = check_valid_addr (fault_addr);
+  bool success = true;
 
   /* If addr is not presented, handle fault addr. */
   if (not_present)
@@ -168,15 +165,26 @@ page_fault (struct intr_frame *f)
     {
       /* Check stack condition. If stack has problem, grow. */
       if (f->esp - fault_addr > 32 || 0xC0000000UL - (uint32_t)fault_addr > 8 * 1024 * 1024)
-        exit(-1);
-
+        success = false;
       /* Stack growth. */
-      if (!stack_growth(fault_addr))
-        exit(-1);
+      else if (!stack_growth(fault_addr))
+        success = false;
     }
     else if (!handle_pf(spte))
-      exit(-1);
+      success = false;
   }
+  else
+    success = false;
+  if (!success)
+    exit(-1);
+  // {
+  //   printf ("Page fault at %p: %s error %s page in %s context.\n",
+  //     	    fault_addr,
+  //      	    not_present ? "not present" : "rights violation",
+  //           write ? "writing" : "reading",
+  //           user ? "user" : "kernel");
+	//   kill (f);
+  // }
 }
 
 

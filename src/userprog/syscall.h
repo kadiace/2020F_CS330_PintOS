@@ -2,10 +2,14 @@
 #define USERPROG_SYSCALL_H
 #include "lib/user/syscall.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 #include "vm/page.h"
+
+#define CLOSE_ALL 4112
 
 void syscall_init (void);
 
+/* Project2 : Userprog. */
 void halt (void);
 void exit (int status);
 pid_t exec (const char *cmd_line);
@@ -19,5 +23,9 @@ int write (int fd, const void *buffer, unsigned size);
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 void close (int fd);
+
+/* Project3 : VM. */
+mapid_t mmap (int fd, void *addr);
+void munmap (mapid_t md);
 
 #endif /* userprog/syscall.h */

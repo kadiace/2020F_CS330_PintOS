@@ -8,11 +8,11 @@
 
 struct fte
 {
-  void *kaddr;
-  struct spte *spte;
-  struct thread *thread;
+  void *kaddr;                      /* Kernel address */
+  struct spte *spte;                /* spte that connected with this frame */
+  struct thread *thread;            /* Thread that contains this frame */
 
-  struct list_elem elem;
+  struct list_elem elem;            /* List element. */
 };
 
 void frame_init (void);
