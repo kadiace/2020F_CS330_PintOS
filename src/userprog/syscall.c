@@ -437,8 +437,8 @@ void delete_mmap(struct map_file *mf, struct thread *cur)
         file_write_at(sp->file, sp->vaddr, sp->read_bytes, sp->offset);
         lock_release(&file_lock);
       }
-      lock_acquire(&frame_lock);
       /* Find spte that connected with frame and free all of them. */
+      lock_acquire(&frame_lock);
       iter_frame = list_begin(get_frame_table());
       while (iter_frame != list_tail(get_frame_table()))
       {
@@ -447,6 +447,7 @@ void delete_mmap(struct map_file *mf, struct thread *cur)
         {
           lock_release(&frame_lock);
           free_frame_perfect(frame);
+          lock_acquire(&frame_lock);
           break;
         }
         iter_frame = iter_frame->next;

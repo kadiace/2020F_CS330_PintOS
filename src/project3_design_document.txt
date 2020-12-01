@@ -16,7 +16,7 @@
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
 
-토큰 2개 사용하겠습니다.
+토큰 3개 사용하겠습니다.
 
 >> Please cite any offline or online sources you consulted while
 >> preparing your submission, other than the Pintos documentation, course
