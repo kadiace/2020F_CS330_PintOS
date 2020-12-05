@@ -1,4 +1,4 @@
-#include "frame.h"
+#include "vm/frame.h"
 #include <debug.h>
 #include <stddef.h>
 #include <stdio.h>
