@@ -512,6 +512,7 @@ chdir (const char *dir)
   struct dir *change_dir = parse_path (dir_copy, file);
   if (change_dir == NULL)
     return false;
+
   /* Find subdir */
   dir_lookup (change_dir, file, &inode);
   if (inode == NULL)
@@ -546,15 +547,9 @@ readdir (int fd, char *name)
   struct dir *dir = dir_open(inode);
   if (dir == NULL)
     return false;
-  
-  // off_t pos = file->pos;
+
+  /* Find whole sub directory or files. */  
   bool result = true;
-  // for (int i = 0; i < pos + 1; i++)
-  // {
-  //   result = dir_readdir(dir, name);
-  //   if (!result)
-  //     break;
-  // }
   int i = 0;
   off_t *pos = (off_t *)file + 1;
   for (i = 0; i <= *pos && result; i++)

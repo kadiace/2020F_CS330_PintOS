@@ -104,13 +104,16 @@ filesys_mkdir (const char *name)
   }
   strlcpy(name_copy, name, NAME_MAX * 2);
   struct dir *dir = parse_path (name_copy, file);
-  // printf("after parse --> file %s -----\n", file);
+  
+  /* Make directory. */
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && dir_create (inode_sector, NAME_MAX + 1)
                   && dir_add (dir, file, inode_sector));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
+
+  /* Make directory ".", ".." */
   if (success)
   {
     struct dir *subdir = dir_open(inode_open(inode_sector));
@@ -150,23 +153,12 @@ filesys_open (const char *name)
   strlcpy(name_copy, name, NAME_MAX * 2);
   struct dir *dir = parse_path (name_copy, file);
 
-  // if (!strcmp(file, "."))
-  // {
-  //   if (dir != NULL)
-  //     dir_lookup (dir, file, &inode);
-  //   dir_close (dir);
-  // }
+  /* Look up directory or file. */
   if (dir != NULL)
-  {
-    // printf("dir is not null\n");
     dir_lookup (dir, file, &inode);
-  }
   dir_close (dir);
   free(file);
   free(name_copy);
-  // if (dir != NULL)
-  //   dir_lookup (dir, name, &inode);
-  // dir_close (dir);
 
   return file_open (inode);
 }
@@ -220,9 +212,6 @@ filesys_remove (const char *name)
   free(file);
   free(name_copy);
   free(temp);
-  // struct dir *dir = dir_open_root ();
-  // bool success = dir != NULL && dir_remove (dir, name);
-  // dir_close (dir); 
 
   return success;
 }

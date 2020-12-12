@@ -11,6 +11,7 @@
    retained, but much longer full path names must be allowed. */
 #define NAME_MAX 14
 
+/* When we create inode, this define type determines the is_file of the inode. */
 #define TYPE_DIR 0
 #define TYPE_FILE 1
 
