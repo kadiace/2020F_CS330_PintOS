@@ -128,6 +128,9 @@ struct thread
     int map_id;                         /* ID for mmap. */
     struct list mmap_list;              /* List of memory mapping files. */
 
+    /* These variables are made for project4 : file system(subdir). */
+    struct dir *dir;                     /* Current working directory. */
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

@@ -6,13 +6,15 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 #include "filesys/buffer_cache.h"
+#include "filesys/directory.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
 /* Make inode_disk size to BLOCK_SECTOR_SIZE */
-#define DIRECT_BLOCK_ENTRIES 124
+#define DIRECT_BLOCK_ENTRIES 123
 #define INDIRECT_BLOCK_ENTRIES (BLOCK_SECTOR_SIZE/sizeof(block_sector_t))
 
 enum sector_type {DIRECT, INDIRECT, DOUBLE_INDIRECT, ERROR};
@@ -23,6 +25,8 @@ struct inode_disk
   {
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
+    uint32_t is_file;                   /* If file type == FILE this variable become 1.
+                                           If file type == DIRECTORY this variable become false.  */
     block_sector_t direct_block_table[DIRECT_BLOCK_ENTRIES];               /* First data sector. */
     block_sector_t indirect_sector;
     block_sector_t double_indirect_sector;
@@ -382,7 +386,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, uint32_t is_file)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -394,31 +398,12 @@ inode_create (block_sector_t sector, off_t length)
   ASSERT (sizeof *disk_inode == BLOCK_SECTOR_SIZE);
 
   disk_inode = calloc (1, BLOCK_SECTOR_SIZE);
-  // if (disk_inode != NULL)
-  //   {
-  //     size_t sectors = bytes_to_sectors (length);
-  //     disk_inode->length = length;
-  //     disk_inode->magic = INODE_MAGIC;
-  //     if (free_map_allocate (sectors, &disk_inode->length)) 
-  //       {
-  //         block_write (fs_device, sector, disk_inode);
-  //         if (sectors > 0) 
-  //           {
-  //             static char zeros[BLOCK_SECTOR_SIZE];
-  //             size_t i;
-              
-  //             for (i = 0; i < sectors; i++) 
-  //               block_write (fs_device, disk_inode->length + i, zeros);
-  //           }
-  //         success = true; 
-  //       } 
-  //     free (disk_inode);
-  //   }
   if (disk_inode != NULL)
   {
     memset(disk_inode, -1, BLOCK_SECTOR_SIZE);
     disk_inode->length = length;
     disk_inode->magic = INODE_MAGIC;
+    disk_inode->is_file = is_file;
     if (!update_file_length (disk_inode, 0, disk_inode->length))
     {
       free(disk_inode);
@@ -509,7 +494,9 @@ inode_close (struct inode *inode)
           struct inode_disk *inode_disk = calloc(1, BLOCK_SECTOR_SIZE);
           if (inode_disk != NULL)
           {
+            lock_release(&inode->lock);
             buffer_cache_read(inode->sector, inode_disk, 0, BLOCK_SECTOR_SIZE, 0);
+            lock_acquire(&inode->lock);
             free_inode_sectors (inode_disk);
             free (inode_disk);
           }
@@ -679,4 +666,89 @@ inode_length (const struct inode *inode)
   off_t answer = inode_disk->length;
   free(inode_disk);
   return answer;
+}
+
+bool
+inode_is_file (const struct inode *inode)
+{
+  if (inode->removed)
+    return true;
+  
+  struct inode_disk *inode_disk = calloc(1, BLOCK_SECTOR_SIZE);
+  if (inode_disk == NULL)
+    return -1;
+  buffer_cache_read(inode->sector, inode_disk, 0, BLOCK_SECTOR_SIZE, 0);
+  
+  uint32_t is_file = inode_disk->is_file;
+  free(inode_disk);
+  return is_file;
+}
+
+struct dir *
+parse_path (char * path, char *file_name)
+{
+  // printf("----------------------path is %s\n", path);
+  struct dir *dir = NULL;
+  if (path == NULL || strlen(path) == 0 || file_name == NULL)
+    return NULL;
+  
+  struct inode *inode = NULL;
+  /* Open dir by first character of path. */
+  if (path[0] == '/')    /* "/~~~" */
+    dir = dir_open_root();
+  else                  /* "~~~~/ or \0" */
+    dir = dir_reopen(thread_current()->dir);
+
+  if (inode_is_file(dir_get_inode(dir)))
+    return NULL;
+  
+  /* Parse file path. */
+  char *token, *next_token, *next_ptr;
+
+  // printf("========path is %s\n", path);
+  token = strtok_r(path, "/", &next_ptr);
+  // printf("========token is %s\n", token);
+  next_token = strtok_r(NULL, "/", &next_ptr);
+  // printf("========token2 is %s\n", next_token);
+  
+
+  if (token == ".")
+  {
+    strlcpy(file_name, token, NAME_MAX + 1);
+    return dir;
+  }
+
+  while (token != NULL && next_token != NULL) 
+  {
+    // printf("========token is %s, next is %s\n", token, next_token);
+    if (!dir_lookup (dir, token, &inode))
+    {
+      // printf("lockup fail.\n");
+      strlcpy(file_name, token, NAME_MAX + 1);
+      return dir;
+    }
+    if (inode_is_file (inode))
+    {
+      // printf("inode is file.\n");
+      // strlcpy(file_name, token, NAME_MAX + 1);
+      return dir;
+    }
+
+    dir_close(dir);
+    dir = dir_open(inode);
+    /* Split whole sentence by '/'. */
+    // strlcpy(file_name, token, NAME_MAX + 1);
+    token = next_token;
+    next_token = strtok_r(NULL, "/", &next_ptr);
+  }
+
+  /* If try removing root dir */
+  if (token == NULL)
+  {
+    // printf("path is / \n");
+    strlcpy(file_name, ".", NAME_MAX + 1);
+  }
+  else
+    strlcpy(file_name, token, NAME_MAX + 1);
+  return dir;
 }

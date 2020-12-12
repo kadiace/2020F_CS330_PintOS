@@ -7,6 +7,8 @@
 #include "userprog/pagedir.h"
 #include "filesys/off_t.h"
 #include "vm/page.h"
+#include "filesys/filesys.h"
+#include "filesys/directory.h"
 
 /* Take struct file to use deny_write at open(), write(). */
 struct file 
@@ -121,6 +123,32 @@ syscall_handler (struct intr_frame *f UNUSED)
       check_valid_string (f->esp + 4, f->esp);
       munmap ((mapid_t) *(uint32_t *)(f->esp + 4));
       break;
+    
+    case SYS_CHDIR :
+      check_valid_string (f->esp + 4, f->esp);
+      f->eax = chdir ((const char *)*(uint32_t *)(f->esp + 4));
+      break;
+
+    case SYS_MKDIR :
+      check_valid_string (f->esp + 4, f->esp);
+      f->eax = mkdir ((const char *)*(uint32_t *)(f->esp + 4));
+      break;
+
+    case SYS_READDIR :
+      check_valid_string (f->esp + 4, f->esp);
+      check_valid_string (f->esp + 8, f->esp);
+      f->eax = readdir ((int) *(uint32_t *)(f->esp + 4), (char *)*(uint32_t *)(f->esp + 8));
+      break;
+
+    case SYS_ISDIR :
+      check_valid_string (f->esp + 4, f->esp);
+      f->eax = isdir ((int) *(uint32_t *)(f->esp + 4));
+      break;
+
+    case SYS_INUMBER :
+      check_valid_string (f->esp + 4, f->esp);
+      f->eax = inumber ((int) *(uint32_t *)(f->esp + 4));
+      break;
   }
 }
 
@@ -179,9 +207,7 @@ int
 open (const char *file)
 {
   if (file == NULL)
-  {
     return -1;
-  }
   lock_acquire(&file_lock);
   /* Change file type to struct file *. */
   struct file *result = filesys_open(file);
@@ -267,6 +293,11 @@ int write (int fd, const void *buffer, unsigned size)
   {
     lock_release(&file_lock);
     return 0;
+  }
+  else if (!inode_is_file(file->inode))
+  {
+    lock_release(&file_lock);
+    return -1;
   }
   /* If file descriptor is user's, return written bytes. */
   int result = file_write(file, buffer, size);
@@ -416,7 +447,8 @@ munmap (mapid_t md)
 
 extern struct lock frame_lock;
 
-void delete_mmap(struct map_file *mf, struct thread *cur)
+void
+delete_mmap(struct map_file *mf, struct thread *cur)
 {
   struct list_elem *base = list_begin(&mf->spte_list);
   struct list_elem *iter_frame;
@@ -459,4 +491,101 @@ void delete_mmap(struct map_file *mf, struct thread *cur)
       delete_spte(&cur->spt, sp);
     base = temp;
   }
+}
+
+bool
+chdir (const char *dir)
+{
+  struct inode *inode = NULL;
+
+  /* Parse path. */
+  char *file = calloc(1, NAME_MAX + 1);
+  if (file == NULL)
+    return false;
+  char *dir_copy = calloc(1, NAME_MAX + 1);
+  if (dir_copy == NULL)
+  {
+    free(file);
+    return false;
+  }
+  strlcpy(dir_copy, dir, NAME_MAX + 1);
+  struct dir *change_dir = parse_path (dir_copy, file);
+  if (change_dir == NULL)
+    return false;
+  /* Find subdir */
+  dir_lookup (change_dir, file, &inode);
+  if (inode == NULL)
+    return false;
+  change_dir = dir_open(inode_open(inode_get_inumber(inode)));
+  dir_close(thread_current()->dir);
+
+  thread_current()->dir = change_dir;
+  return true;
+}
+
+bool
+mkdir (const char *dir)
+{
+  return filesys_mkdir (dir);
+}
+
+bool
+readdir (int fd, char *name)
+{
+  if (fd <= 1)
+    return false;
+  
+  struct file *file = thread_current()->fd_table[fd];
+  if (file == NULL || file->inode == NULL)
+    return false;
+  
+  struct inode *inode = file->inode;
+  if (inode_is_file(inode))
+    return false;
+  
+  struct dir *dir = dir_open(inode);
+  if (dir == NULL)
+    return false;
+  
+  // off_t pos = file->pos;
+  bool result = true;
+  // for (int i = 0; i < pos + 1; i++)
+  // {
+  //   result = dir_readdir(dir, name);
+  //   if (!result)
+  //     break;
+  // }
+  int i = 0;
+  off_t *pos = (off_t *)file + 1;
+  for (i = 0; i <= *pos && result; i++)
+    result = dir_readdir (dir, name);
+  if (i <= *pos == false)
+    (*pos)++;
+
+  return result;
+}
+
+bool
+isdir(int fd)
+{
+  if (fd <= 1)
+    return false;
+  
+  struct file *file = thread_current()->fd_table[fd];
+  if (file == NULL || file->inode == NULL)
+    return false;
+  
+  return !inode_is_file (file->inode);
+}
+
+int
+inumber(int fd)
+{
+  if (fd <= 1)
+    exit(-1);
+  
+  struct file *file = thread_current()->fd_table[fd];
+  if (file == NULL || file->inode == NULL)
+    exit(-1);
+  return inode_get_inumber (file->inode);
 }
