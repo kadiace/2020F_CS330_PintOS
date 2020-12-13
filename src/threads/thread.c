@@ -14,6 +14,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "filesys/directory.h"
 
 
 /* Random value for struct thread's `magic' member.
@@ -242,6 +243,10 @@ thread_create (const char *name, int priority,
     return TID_ERROR;
   }
 #endif
+
+  /* If parent has dir, then child get that dir. */
+  if (thread_current()->dir != NULL)
+    t->dir = dir_reopen(thread_current()->dir);
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -612,6 +617,8 @@ init_thread (struct thread *t, const char *name, int priority)
 
   t->map_id = 0;
   list_init (&t->mmap_list);
+
+  t->dir = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

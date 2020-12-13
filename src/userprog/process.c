@@ -305,6 +305,8 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
+  dir_close (cur->dir);
+
   /* wait_sema up, exit_sema down. */
   sema_up(&cur->wait_sema);
   sema_down(&cur->exit_sema);

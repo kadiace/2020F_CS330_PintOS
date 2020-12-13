@@ -106,18 +106,18 @@ struct thread
 
 #ifdef USERPROG
     /* These variables are made for project2 : user process. */
-   int exit_status;                     /* Status which thread has been terminated, 0 = terminated successfully,
-                                           1 = not terminated yet, -1 = terminated by kernel. */
-   struct list child_list;              /* List of child. Push children when they create. Remove all elements
-                                           when parent process exit.*/
-   struct list_elem child_elem;         /* Element of child. */
-   struct semaphore wait_sema;          /* Sema_up when child process exit. Sema_down when parent's wait() occur. */
-   struct semaphore exit_sema;          /* Sema_up after parent remove his child in child_list.
-                                           Sema_down before child process exit.*/
-   struct semaphore load_sema;          /* Sema_up after child load memory no matter what he successes.
+    int exit_status;                     /* Status which thread has been terminated, 0 = terminated successfully,
+                                            1 = not terminated yet, -1 = terminated by kernel. */
+    struct list child_list;              /* List of child. Push children when they create. Remove all elements
+                                            when parent process exit.*/
+    struct list_elem child_elem;         /* Element of child. */
+    struct semaphore wait_sema;          /* Sema_up when child process exit. Sema_down when parent's wait() occur. */
+    struct semaphore exit_sema;          /* Sema_up after parent remove his child in child_list.
+                                            Sema_down before child process exit.*/
+    struct semaphore load_sema;          /* Sema_up after child load memory no matter what he successes.
                                            Sema_down right after child is created in process_execute(). */
-   bool load_success;                   /* True if load success, False if not. */
-   struct file **fd_table;              /* Table of file descriptor. index 0,1 has standard value, More than 2, user's. */
+    bool load_success;                   /* True if load success, False if not. */
+    struct file **fd_table;              /* Table of file descriptor. index 0,1 has standard value, More than 2, user's. */
 
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -127,6 +127,9 @@ struct thread
     struct hash spt;                    /* Suppliment page table. */
     int map_id;                         /* ID for mmap. */
     struct list mmap_list;              /* List of memory mapping files. */
+
+    /* These variables are made for project4 : file system(subdir). */
+    struct dir *dir;                     /* Current working directory. */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

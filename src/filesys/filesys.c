@@ -6,6 +6,8 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "filesys/buffer_cache.h"
+#include "threads/thread.h"
 
 /* Partition that contains the file system. */
 struct block *fs_device;
@@ -24,10 +26,16 @@ filesys_init (bool format)
   inode_init ();
   free_map_init ();
 
+  /* Initialize buffer cache. */
+  buffer_cache_init();
+
   if (format) 
     do_format ();
 
   free_map_open ();
+
+  /* Set working directory of current thread to root. */
+  thread_current()->dir = dir_open_root ();
 }
 
 /* Shuts down the file system module, writing any unwritten data
@@ -36,6 +44,7 @@ void
 filesys_done (void) 
 {
   free_map_close ();
+  buffer_cache_term();
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
@@ -43,18 +52,80 @@ filesys_done (void)
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size) 
+filesys_create (const char *name, off_t initial_size)
 {
+  // printf("name %s, size %d\n", name, initial_size);
+  if (strlen(name) > NAME_MAX)
+    return false;
+
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
+
+  /* Parse path. */
+  char *file = calloc(1, NAME_MAX + 1);
+  if (file == NULL)
+    return false;
+  char *name_copy = calloc(1, NAME_MAX * 2);
+  if (name_copy == NULL)
+  {
+    free(file);
+    return false;
+  }
+  strlcpy(name_copy, name, NAME_MAX * 2);
+  // printf("name copy %s", name_copy);
+  struct dir *dir = parse_path (name_copy, file);
+
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size)
-                  && dir_add (dir, name, inode_sector));
+                  && inode_create (inode_sector, initial_size, TYPE_FILE)
+                  && dir_add (dir, file, inode_sector));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   dir_close (dir);
 
+  return success;
+}
+
+bool
+filesys_mkdir (const char *name) 
+{
+  block_sector_t inode_sector = 0;
+
+  /* Parse path. */
+  if (strlen(name) > NAME_MAX)
+    return false;
+  char *file = calloc(1, NAME_MAX + 1);
+  if (file == NULL)
+    return false;
+  char *name_copy = calloc(1, NAME_MAX * 2);
+  if (name_copy == NULL)
+  {
+    free(file);
+    return false;
+  }
+  strlcpy(name_copy, name, NAME_MAX * 2);
+  struct dir *dir = parse_path (name_copy, file);
+  
+  /* Make directory. */
+  bool success = (dir != NULL
+                  && free_map_allocate (1, &inode_sector)
+                  && dir_create (inode_sector, NAME_MAX + 1)
+                  && dir_add (dir, file, inode_sector));
+  if (!success && inode_sector != 0) 
+    free_map_release (inode_sector, 1);
+
+  /* Make directory ".", ".." */
+  if (success)
+  {
+    struct dir *subdir = dir_open(inode_open(inode_sector));
+    
+    success = (dir_add (subdir, ".", inode_sector) &&
+              dir_add (subdir, "..", inode_get_inumber(dir_get_inode(dir))));
+    dir_close (subdir);
+  }
+  dir_close (dir);
+
+  free(file);
+  free(name_copy);
   return success;
 }
 
@@ -66,12 +137,28 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
+  // printf("filesys_open(): start\n");
   struct inode *inode = NULL;
+  
+  /* Parse path. */
+  char *file = calloc(1, NAME_MAX + 1);
+  if (file == NULL)
+    return false;
+  char *name_copy = calloc(1, NAME_MAX * 2);
+  if (name_copy == NULL)
+  {
+    free(file);
+    return false;
+  }
+  strlcpy(name_copy, name, NAME_MAX * 2);
+  struct dir *dir = parse_path (name_copy, file);
 
+  /* Look up directory or file. */
   if (dir != NULL)
-    dir_lookup (dir, name, &inode);
+    dir_lookup (dir, file, &inode);
   dir_close (dir);
+  free(file);
+  free(name_copy);
 
   return file_open (inode);
 }
@@ -83,9 +170,52 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  /* Parse path. */
+  char *file = calloc(1, NAME_MAX + 1);
+  if (file == NULL)
+    return false;
+  char *name_copy = calloc(1, NAME_MAX + 1);
+  if (name_copy == NULL)
+  {
+    free(file);
+    return false;
+  }
+  strlcpy(name_copy, name, NAME_MAX + 1);
+  struct dir *dir = parse_path (name_copy, file);
+
+  /* Find subdir. If subdir exist, cancel remove. */
+  struct inode *inode = NULL;
+  struct dir *cur_dir;
+  char *temp = calloc(1, NAME_MAX + 1);
+  if (temp == NULL)
+  {
+    free(file);
+    free(name_copy);
+    return false;
+  }
+
+  bool success = false;
+  if (dir != NULL)
+  {
+    dir_lookup (dir, file, &inode);
+    if (!inode_is_file(inode))
+    {
+      cur_dir = dir_open(inode);
+      /* If dir want to remove is same as working dir of thread, return false. */
+      if (thread_current()->dir != cur_dir)
+      {
+        if (!dir_readdir(cur_dir, temp))
+          success = dir_remove (dir, file);
+      }
+      dir_close(cur_dir);
+    }
+    else
+      success = dir_remove (dir, file);
+  }
+  dir_close (dir);
+  free(file);
+  free(name_copy);
+  free(temp);
 
   return success;
 }
@@ -98,6 +228,10 @@ do_format (void)
   free_map_create ();
   if (!dir_create (ROOT_DIR_SECTOR, 16))
     PANIC ("root directory creation failed");
+  
+  struct dir *dir = dir_open_root();
+  dir_add (dir, ".", ROOT_DIR_SECTOR);
+  dir_add (dir, "..", ROOT_DIR_SECTOR); 
   free_map_close ();
   printf ("done.\n");
 }
