@@ -201,8 +201,12 @@ filesys_remove (const char *name)
     if (!inode_is_file(inode))
     {
       cur_dir = dir_open(inode);
-      if (!dir_readdir(cur_dir, temp))
-        success = dir_remove (dir, file);
+      /* If dir want to remove is same as working dir of thread, return false. */
+      if (thread_current()->dir != cur_dir)
+      {
+        if (!dir_readdir(cur_dir, temp))
+          success = dir_remove (dir, file);
+      }
       dir_close(cur_dir);
     }
     else
